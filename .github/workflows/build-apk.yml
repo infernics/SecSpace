@@ -1,0 +1,73 @@
+name: Build SecNote APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Test and build SecNote 1.2
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK 35
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.7'
+          cache-provider: basic
+
+      - name: Locate Android project
+        id: project
+        shell: bash
+        run: |
+          set -euo pipefail
+          SETTINGS_FILE="$(find . -type f -name settings.gradle.kts -not -path '*/.gradle/*' -print -quit)"
+          if [[ -z "$SETTINGS_FILE" ]]; then
+            echo "ERROR: settings.gradle.kts not found. Upload the contents of the SecNote 1.2 project archive to the repository."
+            exit 1
+          fi
+          PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
+          echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+          echo "Android project found: $PROJECT_DIR"
+
+      - name: Verify SecNote package and version
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_FILE="${{ steps.project.outputs.dir }}/app/build.gradle.kts"
+          test -f "$BUILD_FILE"
+          grep -Fq 'namespace = "infernics.notes"' "$BUILD_FILE"
+          grep -Fq 'applicationId = "infernics.notes"' "$BUILD_FILE"
+          grep -Fq 'versionName = "1.2"' "$BUILD_FILE"
+          grep -Fq 'versionCode = 3' "$BUILD_FILE"
+          echo "Verified: infernics.notes, SecNote 1.2 (versionCode 3)"
+
+      - name: Run unit tests and build APK
+        run: gradle -p "${{ steps.project.outputs.dir }}" testDebugUnitTest assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.project.outputs.dir }}/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+          archive: false
